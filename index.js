@@ -1,7 +1,6 @@
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const Parser = require('rss-parser');
-
 const app = express();
 const parser = new Parser();
 const PORT = process.env.PORT || 3000;
