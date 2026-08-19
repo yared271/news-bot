@@ -8,68 +8,80 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Express Health Check (Render ንቁ ሆኖ እንዲሰራ)
 app.get('/', (req, res) => {
-  res.send('🤖 Live News Telegram Bot is Active & Running!');
+  res.send('🤖 Live News Telegram Bot with Buttons is Active!');
 });
 
-// የቦት ቶከን (የቀጥታ ቶከንህ)
 const token = (process.env.TELEGRAM_BOT_TOKEN || '8898193372:AAEtB1jieSM030BVShaIy6050C6ATNTrl4w').trim();
-console.log('🤖 Starting Telegram Bot with Token...');
-
 const bot = new TelegramBot(token, { polling: true });
 
-bot.on('polling_error', (err) => {
-  console.log('Telegram Polling Log:', err.message);
-});
-
-// የቀጥታ ዜና ከ BBC Amharic ማምጫ ፈንክሽን
-async function getLiveNews() {
+// ዜና ማምጫ ፈንክሽን
+async function fetchNews(rssUrl, count = 4) {
   try {
-    const feed = await parser.parseURL('https://feeds.bbci.co.uk/amharic/rss.xml');
-    return feed.items.slice(0, 5);
-  } catch (e) {
-    console.error('RSS Error:', e.message);
+    const feed = await parser.parseURL(rssUrl);
+    return feed.items.slice(0, count);
+  } catch (error) {
+    console.error('Error:', error.message);
     return [];
   }
 }
 
-// ለማንኛውም የቴሌግራም መልእክት ፈጣን ምላሽ መስጫ
+// ዋናው ምናሌ (Main Menu Keyboard)
+const mainMenuKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '📰 አጠቃላይ ዜና (BBC)' }, { text: '⚽ ስፖርት ዜና (Sport)' }],
+      [{ text: '💻 ቴክኖሎጂ ዜና' }, { text: '🌍 የአለም ዜና' }]
+    ],
+    resize_keyboard: true
+  }
+};
+
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
-  const text = (msg.text || '').trim().toLowerCase();
-  const userName = msg.from.first_name || 'ተጠቃሚ';
+  const text = (msg.text || '').trim();
+  const userName = msg.from.first_name || 'ወዳጄ';
 
   console.log(`📩 መልእክት ደርሷል ከ ${userName}: ${text}`);
 
-  if (text.includes('start')) {
+  if (text === '/start' || text.toLowerCase().includes('start')) {
     const welcome = `👋 ሰላም ${userName}! እንኳን ወደ ዜና ቦት በደህና መጡ።\n\n` +
-      `📰 አዳዲስ የሀገር ውስጥ እና የአለም ዜናዎችን ለማግኘት፦\n\n` +
-      `👉 /news ወይም "ዜና" ብለው ይጻፉልኝ!`;
+      `ከታች ያሉትን አዝራሮች (Buttons) በመጫን የሚፈልጉትን የዜና ዘርፍ ይምረጡ 👇`;
     
-    bot.sendMessage(chatId, welcome);
+    bot.sendMessage(chatId, welcome, mainMenuKeyboard);
   } 
-  else if (text.includes('news') || text.includes('ዜና') || text.includes('zena')) {
-    bot.sendMessage(chatId, '⏳ አዳዲስ ዜናዎችን ከቀጥታ ምንጮች እየሰበሰብኩ ነው...');
+  else if (text.includes('ስፖርት') || text.toLowerCase().includes('sport')) {
+    bot.sendMessage(chatId, '⏳ አዳዲስ የስፖርት ዜናዎችን እያዘጋጀሁ ነው...');
+    const sports = await fetchNews('https://feeds.bbci.co.uk/sport/rss.xml');
 
-    const newsItems = await getLiveNews();
-
-    if (newsItems.length === 0) {
-      bot.sendMessage(chatId, '❌ ዜናዎችን ማምጣት አልተቻለም፤ እባክዎ ትንሽ ቆይተው እንደገና ይሞክሩ።');
+    if (sports.length === 0) {
+      bot.sendMessage(chatId, '❌ የስፖርት ዜናዎችን ማግኘት አልተቻለም፤ እባክዎ ትንሽ ቆይተው ይሞክሩ።');
       return;
     }
 
-    for (let item of newsItems) {
-      const msgText = `🚨 *${item.title}*\n\n` +
-        `📝 ${item.contentSnippet || item.content || ''}\n\n` +
-        `📅 *ቀን:* ${item.pubDate || 'ዛሬ'}\n` +
-        `🔗 [ሙሉውን ዜና ለማንበብ ይጫኑ](${item.link})`;
+    for (let s of sports) {
+      const msgText = `⚽ *${s.title}*\n\n` +
+        `📝 ${s.contentSnippet || ''}\n\n` +
+        `🔗 [ሙሉውን ዜና ለማንበብ ይጫኑ](${s.link})`;
 
       await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
     }
   } 
+  else if (text.includes('አጠቃላይ') || text.includes('ዜና') || text.toLowerCase().includes('news')) {
+    bot.sendMessage(chatId, '⏳ አዳዲስ የቀጥታ ዜናዎችን ከ BBC Amharic እየሰበሰብኩ ነው...');
+    const newsItems = await fetchNews('https://feeds.bbci.co.uk/amharic/rss.xml');
+
+    for (let item of newsItems) {
+      const msgText = `🚨 *${item.title}*\n\n` +
+        `📝 ${item.contentSnippet || ''}\n\n` +
+        `📅 *ቀን:* ${item.pubDate || 'ዛሬ'}\n` +
+        `🔗 [ሙሉውን ለማንበብ ይጫኑ](${item.link})`;
+
+      await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
+    }
+  }
   else {
-    bot.sendMessage(chatId, `ሰላም ${userName}! ዜናዎችን ለማግኘት 👉 /news ብለው ይላኩ።`);
+    bot.sendMessage(chatId, `ከታች ካሉት አማራጮች አንዱን ይምረጡ 👇`, mainMenuKeyboard);
   }
 });
 
