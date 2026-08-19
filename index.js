@@ -8,14 +8,27 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.send('🤖 Live News Telegram Bot with Buttons is Active!');
+// የቦት ቶከን
+const token = (process.env.TELEGRAM_BOT_TOKEN || '8898193372:AAEtB1jieSM030BVShaIy6050C6ATNTrl4w').trim();
+const bot = new TelegramBot(token); // Polling ጠፍቷል (No 409 Conflict)
+
+// የ Render የቀጥታ አድራሻ
+const APP_URL = process.env.RENDER_EXTERNAL_URL || 'https://news-bot-v01x.onrender.com';
+
+// 1. Webhook ማገናኘት
+bot.setWebHook(`${APP_URL}/api/telegram-webhook`).then(() => {
+  console.log(`✅ Webhook connected to: ${APP_URL}/api/telegram-webhook`);
+}).catch(err => {
+  console.log('Webhook setup note:', err.message);
 });
 
-const token = (process.env.TELEGRAM_BOT_TOKEN || '8898193372:AAEtB1jieSM030BVShaIy6050C6ATNTrl4w').trim();
-const bot = new TelegramBot(token, { polling: true });
+// 2. ከቴሌግራም የሚመጡ መልእክቶች መቀበያ (Webhook Endpoint)
+app.post('/api/telegram-webhook', (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
 
-// ዜና ማምጫ ፈንክሽን
+// 3. ዜና ማምጫ ፈንክሽን
 async function fetchNews(rssUrl, count = 4) {
   try {
     const feed = await parser.parseURL(rssUrl);
@@ -26,7 +39,7 @@ async function fetchNews(rssUrl, count = 4) {
   }
 }
 
-// ዋናው ምናሌ (Main Menu Keyboard)
+// 4. የተጠቃሚ አዝራሮች (Menu Buttons)
 const mainMenuKeyboard = {
   reply_markup: {
     keyboard: [
@@ -37,6 +50,7 @@ const mainMenuKeyboard = {
   }
 };
 
+// 5. የመልእክት አቀባበል እና ምላሽ መስጫ
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
@@ -83,6 +97,10 @@ bot.on('message', async (msg) => {
   else {
     bot.sendMessage(chatId, `ከታች ካሉት አማራጮች አንዱን ይምረጡ 👇`, mainMenuKeyboard);
   }
+});
+
+app.get('/', (req, res) => {
+  res.send('🤖 Live News Telegram Bot (Webhook Mode) is Active & Running!');
 });
 
 app.listen(PORT, () => {
