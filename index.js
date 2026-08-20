@@ -48,35 +48,56 @@ async function fetchFeed(url) {
   }
 }
 
-// 🚀 ዜናዎችን ወደ ተጠቃሚዎች ቴሌግራም የሚልክ ፈንክሽን
-async function broadcastLiveNews() {
-  if (subscribers.size === 0) return;
+// 🚀 ለተጠቃሚው ወዲያውኑ የዛሬ ዜናዎችን የመላኪያ ፈንክሽን
+async function sendLiveNewsDirectly(chatId) {
+  for (let f of feeds) {
+    const items = await fetchFeed(f.url);
+    for (let item of items.slice(0, 2)) {
+      const isSport = f.type === 'sport' || (item.title && (item.title.includes('ስፖርት') || item.title.includes('ሊግ') || item.title.includes('ኳስ')));
+      const header = isSport ? '⚽ አዲስ የስፖርት ዜና እና ትንተና' : '🚨 የቀጥታ ሰበር ዜና';
 
-  console.log('🔄 Checking feeds and broadcasting...');
+      const messageText = 
+        `${header}\n\n` +
+        `📌 ርዕስ: ${item.title}\n\n` +
+        `📝 ዝርዝር: ${item.contentSnippet || item.content || 'ሙሉውን መረጃ ከስር ባለው ሊንክ ይመልከቱ።'}\n\n` +
+        `📅 ምንጭ: ${f.name} (${item.pubDate || 'ዛሬ'})\n\n` +
+        `🔗 ሙሉ ዜናውን ለማንበብ ሊንኩን ይጫኑ:\n${item.link}`;
+
+      try {
+        await bot.sendMessage(chatId, messageText);
+        sentArticles.add(item.link);
+      } catch (err) {
+        console.error('Send error:', err.message);
+      }
+    }
+  }
+}
+
+// በየ 2 ደቂቃው አዳዲስ ዜናዎችን ብቻ በራሱ የሚልክ (Auto-Broadcast)
+async function autoBroadcastNewOnly() {
+  if (subscribers.size === 0) return;
 
   for (let f of feeds) {
     const items = await fetchFeed(f.url);
-
-    for (let item of items.slice(0, 3)) {
+    for (let item of items.slice(0, 2)) {
       if (item.link && !sentArticles.has(item.link)) {
         sentArticles.add(item.link);
 
         const isSport = f.type === 'sport' || (item.title && (item.title.includes('ስፖርት') || item.title.includes('ሊግ') || item.title.includes('ኳስ')));
         const header = isSport ? '⚽ አዲስ የስፖርት ዜና እና ትንተና' : '🚨 የቀጥታ ሰበር ዜና';
 
-        // ምንም አይነት የ Markdown ስህተት እንዳይፈጠር በንጹህ ጽሁፍ ተዘጋጅቷል
         const messageText = 
           `${header}\n\n` +
           `📌 ርዕስ: ${item.title}\n\n` +
           `📝 ዝርዝር: ${item.contentSnippet || item.content || 'ሙሉውን መረጃ ከስር ባለው ሊንክ ይመልከቱ።'}\n\n` +
-          `📅 ምንጭ: ${f.name} (${item.pubDate || 'ዛሬ'})\n\n` +
-          `🔗 ሙሉ ዜናውን ለማንበብ ሊንኩን ይጫኑ:\n${item.link}`;
+          `📅 ምንጭ: ${f.name} (${item.pubDate || 'አሁን'})\n\n` +
+          `🔗 ሙሉ ዜናውን ለማንበብ:\n${item.link}`;
 
         for (let chatId of subscribers) {
           try {
             await bot.sendMessage(chatId, messageText);
           } catch (err) {
-            console.error('Send error:', err.message);
+            console.error('Broadcast error:', err.message);
           }
         }
       }
@@ -84,8 +105,7 @@ async function broadcastLiveNews() {
   }
 }
 
-// በየ 2 ደቂቃው ዜናዎችን በራሱ ይመረምራል (Every 2 minutes)
-setInterval(broadcastLiveNews, 2 * 60 * 1000);
+setInterval(autoBroadcastNewOnly, 2 * 60 * 1000);
 
 // ሰርቨሩ እንዳይተኛ በየ 8 ደቂቃው ራሱን የሚቀሰቅስ (Keep-Alive)
 setInterval(() => {
@@ -94,7 +114,7 @@ setInterval(() => {
 
 app.get('/ping', (req, res) => res.send('Awake'));
 
-// ተጠቃሚው ሲገባ
+// ተጠቃሚው መልእክት ሲልክ ወዲያውኑ ዜና ይልክለታል
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'ወዳጄ';
@@ -103,13 +123,18 @@ bot.on('message', async (msg) => {
 
   const welcome = 
     `👋 ሰላም ${userName}!\n\n` +
-    `⚽ 24/7 የቀጥታ የስፖርት እና ሰበር ዜናዎች ማሳወቂያ በርቷል!\n\n` +
-    `ከዚህ በኋላ ምንም መንካት አይጠበቅብዎትም፤ በየደቂቃው አዳዲስ የስፖርት እና የሊግ ዜናዎች በራሳቸው ጊዜ ወደ ስልክዎ ይላካሉ! 🇪🇹🔔`;
+    `⚽ የዛሬ የቀጥታ የስፖርት እና ሰበር ዜናዎችን አሁኑኑ እያመጣሁልዎ ነው... 👇`;
 
   await bot.sendMessage(chatId, welcome);
   
-  // ወዲያውኑ ዜናዎችን እንዲልክ ማድረግ
-  broadcastLiveNews();
+  // 🔥 ያለምንም መዘግየት ወዲያውኑ ዜናዎችን ወደ ቴሌግራምህ መላክ
+  await sendLiveNewsDirectly(chatId);
 });
 
-app.get('/', (r
+app.get('/', (req, res) => {
+  res.send('⚡ Real-time News Bot is Active & Ready!');
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Sports & News Server running on port ${PORT}`);
+});
