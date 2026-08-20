@@ -1,6 +1,7 @@
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const Parser = require('rss-parser');
+const https = require('https');
 
 const app = express();
 const parser = new Parser();
@@ -13,8 +14,9 @@ const bot = new TelegramBot(token);
 
 const APP_URL = process.env.RENDER_EXTERNAL_URL || 'https://news-bot-v01x.onrender.com';
 
+// 1. Webhook ማገናኘት
 bot.setWebHook(`${APP_URL}/api/telegram-webhook`).then(() => {
-  console.log(`✅ Webhook connected: ${APP_URL}/api/telegram-webhook`);
+  console.log(`✅ Webhook active: ${APP_URL}/api/telegram-webhook`);
 }).catch(err => console.log('Webhook note:', err.message));
 
 app.post('/api/telegram-webhook', (req, res) => {
@@ -22,35 +24,35 @@ app.post('/api/telegram-webhook', (req, res) => {
   res.sendStatus(200);
 });
 
-// ተመዝጋቢዎች እና የተላኩ ዜናዎች ማከማቻ (Auto-Broadcast System)
+// ተመዝጋቢዎች እና የተላኩ ዜናዎች ማከማቻ
 const subscribers = new Set();
 const sentArticles = new Set();
 
-async function fetchNews(rssUrl, count = 4) {
+async function fetchFeed(url, count = 3) {
   try {
-    const feed = await parser.parseURL(rssUrl);
+    const feed = await parser.parseURL(url);
     return feed.items.slice(0, count);
   } catch (error) {
-    console.error('Error fetching RSS:', error.message);
     return [];
   }
 }
 
-// 🚀 በራሱ ጊዜ (Automatically) የስፖርት እና ሰበር ዜና የሚልክ ፈንክሽን
-async function autoBroadcastSportsAndNews() {
-  console.log('🔄 Checking for new Sports & Breaking news...');
+// 🚀 24/7 አውቶማቲክ የስፖርት እና ሰበር ዜና ላኪ (Auto-Push Engine)
+async function runAutoBroadcaster() {
+  console.log('🔄 አዳዲስ የስፖርት እና ሰበር ዜናዎች በራስ-ሰር እየተፈተሹ ነው...');
+
   if (subscribers.size === 0) return;
 
-  // 1. አዳዲስ የስፖርት ዜናዎችን መፈተሽ (Sports Auto-Send)
-  const sports = await fetchNews('https://feeds.bbci.co.uk/sport/football/rss.xml', 2);
+  // 1. የስፖርት ዜናዎችን መፈተሽ እና መላክ (Sports News)
+  const sports = await fetchFeed('https://feeds.bbci.co.uk/sport/football/rss.xml', 2);
   for (let s of sports) {
     if (s.link && !sentArticles.has(s.link)) {
       sentArticles.add(s.link);
-      const msg = `⚽ *አዲስ የስፖርት ዜና (Sport Update)*\n\n` +
+      const msg = `⚽ *አዲስ የስፖርት ዜና (Live Sport)*\n\n` +
         `📌 *${s.title}*\n\n` +
         `📝 ${s.contentSnippet || ''}\n\n` +
         `📅 *ቀን:* ${s.pubDate || 'አሁን'}\n` +
-        `🔗 [ሙሉውን ያንብቡ](${s.link})`;
+        `🔗 [ሙሉውን ዜና ለማንበብ ይጫኑ](${s.link})`;
 
       for (let chatId of subscribers) {
         try {
@@ -60,8 +62,8 @@ async function autoBroadcastSportsAndNews() {
     }
   }
 
-  // 2. አዳዲስ አጠቃላይ ሰበር ዜናዎችን መፈተሽ
-  const general = await fetchNews('https://feeds.bbci.co.uk/amharic/rss.xml', 2);
+  // 2. አጠቃላይ ሰበር ዜናዎችን መፈተሽ እና መላክ (Breaking News)
+  const general = await fetchFeed('https://feeds.bbci.co.uk/amharic/rss.xml', 2);
   for (let g of general) {
     if (g.link && !sentArticles.has(g.link)) {
       sentArticles.add(g.link);
@@ -69,7 +71,7 @@ async function autoBroadcastSportsAndNews() {
         `📌 *${g.title}*\n\n` +
         `📝 ${g.contentSnippet || ''}\n\n` +
         `📅 *ቀን:* ${g.pubDate || 'አሁን'}\n` +
-        `🔗 [ሙሉውን ያንብቡ](${g.link})`;
+        `🔗 [ሙሉውን ዜና ለማንበብ ይጫኑ](${g.link})`;
 
       for (let chatId of subscribers) {
         try {
@@ -80,100 +82,40 @@ async function autoBroadcastSportsAndNews() {
   }
 }
 
-// በየ 5 ደቂቃው አዳዲስ የስፖርት እና ሰበር ዜናዎችን በራሱ ጊዜ ይልካል (Auto-Timer)
-setInterval(autoBroadcastSportsAndNews, 5 * 60 * 1000);
+// በየ 3 ደቂቃው በራሱ ጊዜ ይመረምራል (Runs every 3 minutes)
+setInterval(runAutoBroadcaster, 3 * 60 * 1000);
 
-const mainMenuKeyboard = {
-  reply_markup: {
-    keyboard: [
-      [{ text: '🏆 የስፖርት ሊጎች እና ውጤቶች (Leagues)' }, { text: '⚽ አጠቃላይ ስፖርት' }],
-      [{ text: '📰 አጠቃላይ ዜና (BBC)' }, { text: '🔔 ራስ-ሰር ስፖርት ማሳወቂያ በርቷል ✅' }]
-    ],
-    resize_keyboard: true
-  }
-};
+// ሰርቨሩ ተኝቶ እንዳይዘጋ በየ 10 ደቂቃው ራሱን በራሱ የሚቀሰቅስ (24/7 Keep-Alive Self Ping)
+setInterval(() => {
+  https.get(`${APP_URL}/ping`, () => {
+    console.log('⚡ 24/7 Keep-Alive Ping Sent');
+  }).on('error', () => {});
+}, 10 * 60 * 1000);
 
-const leaguesKeyboard = {
-  reply_markup: {
-    keyboard: [
-      [{ text: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 የእንግሊዝ ፕሪሚየር ሊግ (EPL)' }, { text: '🇪🇸 የስፔን ላሊጋ (La Liga)' }],
-      [{ text: '🏆 ቻምፒየንስ ሊግ (UCL)' }, { text: '🇪🇹 የኢትዮጵያ ፕሪሚየር ሊግ' }],
-      [{ text: '🔙 ወደ ዋናው ምናሌ ተመለስ' }]
-    ],
-    resize_keyboard: true
-  }
-};
+app.get('/ping', (req, res) => res.send('Pong! Server is Awake 24/7'));
 
-const leagueInfo = {
-  epl: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 *የእንግሊዝ ፕሪሚየር ሊግ (Premier League)*\n\n" +
-       "📊 *የደረጃ ሰንጠረዥ አናት:*\n" +
-       "1️⃣ ማንቸስተር ሲቲ (Man City)\n" +
-       "2️⃣ አርሰናል (Arsenal)\n" +
-       "3️⃣ ሊቨርፑል (Liverpool)\n" +
-       "4️⃣ አስቶን ቪላ (Aston Villa)\n\n" +
-       "⚽ *ተጠባቂ ጨዋታዎች:* ማንቸስተር ዩናይትድ 🆚 ሊቨርፑል | አርሰናል 🆚 ቶተንሃም",
-
-  laliga: "🇪🇸 *የስፔን ላሊጋ (La Liga)*\n\n" +
-          "📊 *የደረጃ ሰንጠረዥ አናት:*\n" +
-          "1️⃣ ሪያል ማድሪድ (Real Madrid)\n" +
-          "2️⃣ ባርሴሎና (Barcelona)\n" +
-          "3️⃣ አትሌቲኮ ማድሪድ (Atlético Madrid)\n" +
-          "4️⃣ ጂሮና (Girona)",
-
-  ucl: "🏆 *የአውሮፓ ቻምፒየንስ ሊግ (UEFA Champions League)*\n\n" +
-       "🌟 *የዘንድሮው አዲሱ የሊግ ፎርማት (League Phase):*\n" +
-       "• 36 ታላላቅ የአውሮፓ ክለቦች በአንድ ትልቅ ሊግ ውስጥ ይወዳደራሉ\n" +
-       "• ከፍተኛ ነጥብ ያገኙ 8 ቡድኖች በቀጥታ ወደ 16ቱ ጥሎ ማለፍ ያልፋሉ!",
-
-  ethio: "🇪🇹 *የኢትዮጵያ ፕሪሚየር ሊግ (Ethiopian Premier League)*\n\n" +
-         "📊 *የሊጉ ተፎካካሪ ክለቦች:*\n" +
-         "• ቅዱስ ጊዮርጊስ (St. George)\n" +
-         "• ፋሲል ከነማ (Fasil Kenema)\n" +
-         "• ሲዳማ ቡና (Sidama Coffee)\n" +
-         "• ኢትዮጵያ ቡና (Ethiopia Bunna)"
-};
-
+// ተጠቃሚው ሲገባ
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
-  const text = (msg.text || '').trim();
   const userName = msg.from.first_name || 'ወዳጄ';
 
-  // ተጠቃሚውን ወደ አውቶማቲክ ዜና ተቀባይነት መመዝገብ
+  // ተጠቃሚውን በቀጥታ ዜና እንዲደርሰው መመዝገብ
   subscribers.add(chatId);
 
-  if (text === '/start' || text.toLowerCase().includes('start')) {
-    const welcome = `👋 ሰላም ${userName}! እንኳን ወደ ዜና እና ስፖርት ቦት በደህና መጡ።\n\n` +
-      `🔔 *ራስ-ሰር የስፖርት እና ሰበር ዜና ማሳወቂያ በርቷል!* አዳዲስ ዜናዎች ሲወጡ ምንም ሳትነኩ በራሱ ጊዜ ይደርሳችኋል!\n\n` +
-      `ወዲያውኑ መረጃ ለማግኘት ከታች ካሉት አዝራሮች መምረጥ ትችላላችሁ 👇`;
-    
-    bot.sendMessage(chatId, welcome, mainMenuKeyboard);
-    // ወዲያውኑ ወቅታዊ ዜናዎችን መላክ
-    autoBroadcastSportsAndNews();
-  } 
-  else if (text.includes('ሊጎች') || text.toLowerCase().includes('league')) {
-    bot.sendMessage(chatId, '🏆 የሚፈልጉትን የስፖርት ሊግ ይምረጡ 👇', leaguesKeyboard);
-  }
-  else if (text.includes('እንግሊዝ') || text.includes('EPL')) {
-    await bot.sendMessage(chatId, leagueInfo.epl, { parse_mode: 'Markdown' });
-  }
-  else if (text.includes('ላሊጋ') || text.includes('La Liga')) {
-    bot.sendMessage(chatId, leagueInfo.laliga, { parse_mode: 'Markdown' });
-  }
-  else if (text.includes('ቻምፒየንስ') || text.includes('UCL')) {
-    bot.sendMessage(chatId, leagueInfo.ucl, { parse_mode: 'Markdown' });
-  }
-  else if (text.includes('ኢትዮጵያ')) {
-    bot.sendMessage(chatId, leagueInfo.ethio, { parse_mode: 'Markdown' });
-  }
-  else if (text.includes('ተመለስ') || text.includes('ዋናው')) {
-    bot.sendMessage(chatId, 'ወደ ዋናው ምናሌ ተመልሰዋል 👇', mainMenuKeyboard);
-  }
-  else if (text.includes('ስፖርት') || text.toLowerCase().includes('sport')) {
-    bot.sendMessage(chatId, '⏳ አዳዲስ የስፖርት ዜናዎችን እያዘጋጀሁ ነው...');
-    const sports = await fetchNews('https://feeds.bbci.co.uk/sport/football/rss.xml', 3);
-    for (let s of sports) {
-      await bot.sendMessage(chatId, `⚽ *${s.title}*\n\n📝 ${s.contentSnippet || ''}\n\n🔗 [ሙሉውን ያንብቡ](${s.link})`, { parse_mode: 'Markdown' });
-    }
-  } 
-  else if (text.includes('አጠቃላይ') || text.includes('ዜና') || text.toLowerCase().includes('news')) {
-    bot.sendMessage(chatId, '⏳ አዳዲስ የቀጥታ ዜናዎችን ከ BBC Am
+  const welcome = `👋 ሰላም ${userName}!\n\n` +
+    `✅ *24/7 ራስ-ሰር የዜና ማሳወቂያ ሙሉ በሙሉ በርቷል!*\n\n` +
+    `ከዚህ በኋላ እርስዎ ምንም መንካት አይጠበቅብዎትም፤ አዲስ የስፖርትም ሆነ ሰበር ዜና ሲወጣ ቦቱ በራሱ ጊዜ በቀጥታ ስልክዎ ላይ ያመጣልዎታል! ⚽📰🔔`;
+
+  bot.sendMessage(chatId, welcome, { parse_mode: 'Markdown' });
+  
+  // ወዲያውኑ ወቅታዊ ዜናዎችን መላክ
+  runAutoBroadcaster();
+});
+
+app.get('/', (req, res) => {
+  res.send('🤖 24/7 Automated Sports & News Telegram Bot is Live!');
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Automated Bot Server running on port ${PORT}`);
+});
