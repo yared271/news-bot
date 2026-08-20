@@ -6,7 +6,7 @@ const https = require('https');
 const app = express();
 const parser = new Parser({
   headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
   }
 });
 const PORT = process.env.PORT || 3000;
@@ -31,51 +31,85 @@ app.post('/api/telegram-webhook', (req, res) => {
 const subscribers = new Set();
 const sentArticles = new Set();
 
-// 2. እውነተኛ የዛሬ የቀጥታ የስፖርት ትንተና እና ዜና ማምጫዎች (Live Real-Time Feeds)
-const liveSources = [
-  // የቀጥታ የስፖርት እና የእግር ኳስ ትንተና በአማርኛ
-  {
-    url: 'https://news.google.com/rss/search?q=%E1%88%B5%E1%8D%8E%E1%88%AD%E1%89%85+OR+%E1%8D%95%E1%88%AD%E1%88%9A%E1%8B%A8%E1%88%AD+%E1%88%8A%E1%8B%9D+OR+%E1%8A%A5%E1%8C%8D%E1%88%8D+%E1%8A%B3%E1%88%B5&hl=am&gl=ET&ceid=ET:am',
-    type: 'sport'
-  },
-  // BBC Amharic የቀጥታ ዜና
-  {
-    url: 'https://feeds.bbci.co.uk/amharic/rss.xml',
-    type: 'general'
-  },
-  // DW Amharic የቀጥታ ዜና
-  {
-    url: 'https://rss.dw.com/rdf/rss-amh-news',
-    type: 'general'
-  }
+// 2. እውነተኛ የቀጥታ የስፖርት እና የሰበር ዜና ምንጮች
+const feeds = [
+  { name: 'BBC Amharic', url: 'https://feeds.bbci.co.uk/amharic/rss.xml', type: 'general' },
+  { name: 'BBC Football Sport', url: 'https://feeds.bbci.co.uk/sport/football/rss.xml', type: 'sport' },
+  { name: 'SkySports Football', url: 'https://www.skysports.com/rss/12040', type: 'sport' }
 ];
 
-async function fetchLiveFeed(url) {
+async function fetchFeed(url) {
   try {
     const feed = await parser.parseURL(url);
     return feed.items || [];
   } catch (error) {
+    console.error('Fetch error:', error.message);
     return [];
   }
 }
 
-// 🚀 የዛሬ ትኩስ የስፖርት ትንተና እና ዜናዎችን ብቻ በራሱ የሚልክ ፈንክሽን
-async function broadcastTodayFreshNews() {
+// 🚀 ዜናዎችን ወደ ተጠቃሚዎች ቴሌግራም የሚልክ ፈንክሽን
+async function broadcastLiveNews() {
   if (subscribers.size === 0) return;
 
-  console.log('🔍 ዛሬ የወጡ ትኩስ የስፖርት እና የዜና መረጃዎችን እየፈተሸ ነው...');
+  console.log('🔄 Checking feeds and broadcasting...');
 
-  for (let source of liveSources) {
-    const items = await fetchLiveFeed(source.url);
+  for (let f of feeds) {
+    const items = await fetchFeed(f.url);
 
-    for (let item of items.slice(0, 4)) {
+    for (let item of items.slice(0, 3)) {
       if (item.link && !sentArticles.has(item.link)) {
         sentArticles.add(item.link);
 
-        const title = item.title || '';
-        const isSport = source.type === 'sport' || 
-                        title.includes('ስፖርት') || 
-                        title.includes('ሊግ') || 
-                        title.includes('ኳስ') || 
-                        title.includes('አርሰናል') || 
-                        ti
+        const isSport = f.type === 'sport' || (item.title && (item.title.includes('ስፖርት') || item.title.includes('ሊግ') || item.title.includes('ኳስ')));
+        const header = isSport ? '⚽ አዲስ የስፖርት ዜና እና ትንተና' : '🚨 የቀጥታ ሰበር ዜና';
+
+        // ምንም አይነት የ Markdown ስህተት እንዳይፈጠር በንጹህ ጽሁፍ ተዘጋጅቷል
+        const messageText = 
+          `${header}\n\n` +
+          `📌 ርዕስ: ${item.title}\n\n` +
+          `📝 ዝርዝር: ${item.contentSnippet || item.content || 'ሙሉውን መረጃ ከስር ባለው ሊንክ ይመልከቱ።'}\n\n` +
+          `📅 ምንጭ: ${f.name} (${item.pubDate || 'ዛሬ'})\n\n` +
+          `🔗 ሙሉ ዜናውን ለማንበብ ሊንኩን ይጫኑ:\n${item.link}`;
+
+        for (let chatId of subscribers) {
+          try {
+            await bot.sendMessage(chatId, messageText);
+          } catch (err) {
+            console.error('Send error:', err.message);
+          }
+        }
+      }
+    }
+  }
+}
+
+// በየ 2 ደቂቃው ዜናዎችን በራሱ ይመረምራል (Every 2 minutes)
+setInterval(broadcastLiveNews, 2 * 60 * 1000);
+
+// ሰርቨሩ እንዳይተኛ በየ 8 ደቂቃው ራሱን የሚቀሰቅስ (Keep-Alive)
+setInterval(() => {
+  https.get(`${APP_URL}/ping`, () => {}).on('error', () => {});
+}, 8 * 60 * 1000);
+
+app.get('/ping', (req, res) => res.send('Awake'));
+
+// ተጠቃሚው ሲገባ
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  const userName = msg.from.first_name || 'ወዳጄ';
+
+  subscribers.add(chatId);
+
+  const welcome = 
+    `👋 ሰላም ${userName}!\n\n` +
+    `⚽ 24/7 የቀጥታ የስፖርት እና ሰበር ዜናዎች ማሳወቂያ በርቷል!\n\n` +
+    `ከዚህ በኋላ ምንም መንካት አይጠበቅብዎትም፤ በየደቂቃው አዳዲስ የስፖርት እና የሊግ ዜናዎች በራሳቸው ጊዜ ወደ ስልክዎ ይላካሉ! 🇪🇹🔔`;
+
+  await bot.sendMessage(chatId, welcome);
+  
+  // ወዲያውኑ ዜናዎችን እንዲልክ ማድረግ
+  broadcastLiveNews();
+});
+
+app.get('/', (r
