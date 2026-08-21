@@ -14,7 +14,8 @@ const parser = new Parser({
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
-const token = (process.env.TELEGRAM_BOT_TOKEN || '8898193372:AAEtB1jieSM030BVShaIy6050C6ATNTrl4w').trim();
+// 🔑 አዲሱ ቦት ቶከን ተተክቷል
+const token = (process.env.TELEGRAM_BOT_TOKEN || '8633380352:AAE1wkQU1Sejn4j6XfbPd33iMxWQ7C9VMn4').trim();
 const bot = new TelegramBot(token);
 
 const APP_URL = process.env.RENDER_EXTERNAL_URL || 'https://news-bot-v01x.onrender.com';
@@ -57,7 +58,7 @@ async function translateToAmharic(text) {
   } catch (err) {
     console.error('Translation error:', err.message);
   }
-  return text; // ችግር ካጋጠመ ኦሪጅናሉን ይመልሳል
+  return text;
 }
 
 async function fetchFeed(url) {
@@ -98,14 +99,13 @@ async function formatAndSendNews(chatId, item, sourceName) {
 async function sendLiveNewsDirectly(chatId) {
   for (let f of feeds) {
     const items = await fetchFeed(f.url);
-    // ከእያንዳንዱ ምንጭ የቅርብ 3 ዜናዎችን ወዲያውኑ ይልካል
     for (let item of items.slice(0, 3)) {
       await formatAndSendNews(chatId, item, f.name);
     }
   }
 }
 
-// ⏰ በየ 1 ደቂቃው አዳዲስ የፕሪሚየር ሊግ ዜናዎች እንደወጡ በራሱ የሚልክ (ቀን ከ 30 በላይ ይደርሳል)
+// ⏰ በየ 1 ደቂቃው አዳዲስ የፕሪሚየር ሊግ ዜናዎች እንደወጡ በራሱ የሚልክ (ቀን ከ 20-30 በላይ)
 async function autoBroadcastNewOnly() {
   if (subscribers.size === 0) return;
 
@@ -115,7 +115,7 @@ async function autoBroadcastNewOnly() {
       if (item.link && !sentArticles.has(item.link)) {
         sentArticles.add(item.link);
 
-        // የድሮ ሊንኮች ሚሞሪ እንዳይሞሉ መቆጣጠሪያ
+        // ሚሞሪ እንዳይሞላ የቆዩትን ማጽዳት
         if (sentArticles.size > 2000) {
           const arr = Array.from(sentArticles);
           arr.slice(0, 500).forEach(link => sentArticles.delete(link));
@@ -149,7 +149,7 @@ bot.on('message', async (msg) => {
     const welcome = 
       `👋 ሰላም ${userName}!\n\n` +
       `⚽ የእንግሊዝ ፕሪሚየር ሊግ እና የስፖርት ዜናዎችን በቀጥታ በአማርኛ ማግኘት ጀምረዋል...\n\n` +
-      `🔄 አዳዲስ ዜናዎችን እያዘጋጀሁ ነው 👇`;
+      `🔄 የቅርብ ጊዜ ዜናዎችን እያዘጋጀሁ ነው 👇`;
 
     await bot.sendMessage(chatId, welcome);
     await sendLiveNewsDirectly(chatId);
