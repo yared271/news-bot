@@ -7,10 +7,11 @@ const app = express();
 const parser = new Parser({
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-  }
+  },
+  timeout: 10000
 });
-const PORT = process.env.PORT || 3000;
 
+const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 const token = (process.env.TELEGRAM_BOT_TOKEN || '8898193372:AAEtB1jieSM030BVShaIy6050C6ATNTrl4w').trim();
@@ -31,12 +32,33 @@ app.post('/api/telegram-webhook', (req, res) => {
 const subscribers = new Set();
 const sentArticles = new Set();
 
-// 2. እውነተኛ የቀጥታ የስፖርት እና የሰበር ዜና ምንጮች
+// 2. ፈጣን የእንግሊዝ ፕሪሚየር ሊግ እና የስፖርት ዜና ምንጮች
 const feeds = [
-  { name: 'BBC Amharic', url: 'https://feeds.bbci.co.uk/amharic/rss.xml', type: 'general' },
-  { name: 'BBC Football Sport', url: 'https://feeds.bbci.co.uk/sport/football/rss.xml', type: 'sport' },
-  { name: 'SkySports Football', url: 'https://www.skysports.com/rss/12040', type: 'sport' }
+  { name: 'SkySports Premier League', url: 'https://www.skysports.com/rss/11095', type: 'sport' },
+  { name: 'BBC Football', url: 'https://feeds.bbci.co.uk/sport/football/rss.xml', type: 'sport' },
+  { name: 'Guardian Premier League', url: 'https://www.theguardian.com/football/premierleague/rss', type: 'sport' },
+  { name: 'talkSPORT Premier League', url: 'https://talksport.com/football/premier-league/feed/', type: 'sport' },
+  { name: 'BBC Amharic Sport', url: 'https://feeds.bbci.co.uk/amharic/rss.xml', type: 'amharic' }
 ];
+
+// 🌐 ማንኛውንም የእንግሊዝኛ ዜና ወደ አማርኛ በነጻ የሚቀይር ፈንክሽን
+async function translateToAmharic(text) {
+  if (!text) return '';
+  // ፅሁፉ ቀድሞውኑ አማርኛ ከሆነ እንዳለ ይተወዋል
+  if (/[\u1200-\u137F]/.test(text)) return text;
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=am&dt=t&q=${encodeURIComponent(text.substring(0, 1500))}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data && data[0]) {
+      return data[0].map(item => item[0]).join('');
+    }
+  } catch (err) {
+    console.error('Translation error:', err.message);
+  }
+  return text; // ችግር ካጋጠመ ኦሪጅናሉን ይመልሳል
+}
 
 async function fetchFeed(url) {
   try {
@@ -48,93 +70,96 @@ async function fetchFeed(url) {
   }
 }
 
-// 🚀 ለተጠቃሚው ወዲያውኑ የዛሬ ዜናዎችን የመላኪያ ፈንክሽን
+// 🚀 የዜና ፅሁፍ አዘጋጅቶ በአማርኛ ማስተላለፊያ
+async function formatAndSendNews(chatId, item, sourceName) {
+  const rawTitle = item.title || '';
+  const rawDesc = item.contentSnippet || item.content || item.summary || '';
+
+  // ወደ አማርኛ መተርጎም
+  const titleAm = await translateToAmharic(rawTitle);
+  const descAm = await translateToAmharic(rawDesc.slice(0, 300));
+
+  const messageText = 
+    `⚽ <b>የቀጥታ ስፖርት ዜና (ፕሪሚየር ሊግ)</b>\n\n` +
+    `📌 <b>${titleAm}</b>\n\n` +
+    `📝 ${descAm}...\n\n` +
+    `📡 ምንጭ: ${sourceName}\n` +
+    `🔗 <a href="${item.link}">ሙሉ መረጃውን ለማንበብ ይጫኑ</a>`;
+
+  try {
+    await bot.sendMessage(chatId, messageText, { parse_mode: 'HTML', disable_web_page_preview: false });
+    sentArticles.add(item.link);
+  } catch (err) {
+    console.error('Send error:', err.message);
+  }
+}
+
+// 🚀 ተጠቃሚው ሲጀምር ወዲያውኑ የዛሬ አዳዲስ ዜናዎችን መላክ
 async function sendLiveNewsDirectly(chatId) {
   for (let f of feeds) {
     const items = await fetchFeed(f.url);
-    for (let item of items.slice(0, 2)) {
-      const isSport = f.type === 'sport' || (item.title && (item.title.includes('ስፖርት') || item.title.includes('ሊግ') || item.title.includes('ኳስ')));
-      const header = isSport ? '⚽ አዲስ የስፖርት ዜና እና ትንተና' : '🚨 የቀጥታ ሰበር ዜና';
-
-      const messageText = 
-        `${header}\n\n` +
-        `📌 ርዕስ: ${item.title}\n\n` +
-        `📝 ዝርዝር: ${item.contentSnippet || item.content || 'ሙሉውን መረጃ ከስር ባለው ሊንክ ይመልከቱ።'}\n\n` +
-        `📅 ምንጭ: ${f.name} (${item.pubDate || 'ዛሬ'})\n\n` +
-        `🔗 ሙሉ ዜናውን ለማንበብ ሊንኩን ይጫኑ:\n${item.link}`;
-
-      try {
-        await bot.sendMessage(chatId, messageText);
-        sentArticles.add(item.link);
-      } catch (err) {
-        console.error('Send error:', err.message);
-      }
+    // ከእያንዳንዱ ምንጭ የቅርብ 3 ዜናዎችን ወዲያውኑ ይልካል
+    for (let item of items.slice(0, 3)) {
+      await formatAndSendNews(chatId, item, f.name);
     }
   }
 }
 
-// በየ 2 ደቂቃው አዳዲስ ዜናዎችን ብቻ በራሱ የሚልክ (Auto-Broadcast)
+// ⏰ በየ 1 ደቂቃው አዳዲስ የፕሪሚየር ሊግ ዜናዎች እንደወጡ በራሱ የሚልክ (ቀን ከ 30 በላይ ይደርሳል)
 async function autoBroadcastNewOnly() {
   if (subscribers.size === 0) return;
 
   for (let f of feeds) {
     const items = await fetchFeed(f.url);
-    for (let item of items.slice(0, 2)) {
+    for (let item of items.slice(0, 5)) {
       if (item.link && !sentArticles.has(item.link)) {
         sentArticles.add(item.link);
 
-        const isSport = f.type === 'sport' || (item.title && (item.title.includes('ስፖርት') || item.title.includes('ሊግ') || item.title.includes('ኳስ')));
-        const header = isSport ? '⚽ አዲስ የስፖርት ዜና እና ትንተና' : '🚨 የቀጥታ ሰበር ዜና';
-
-        const messageText = 
-          `${header}\n\n` +
-          `📌 ርዕስ: ${item.title}\n\n` +
-          `📝 ዝርዝር: ${item.contentSnippet || item.content || 'ሙሉውን መረጃ ከስር ባለው ሊንክ ይመልከቱ።'}\n\n` +
-          `📅 ምንጭ: ${f.name} (${item.pubDate || 'አሁን'})\n\n` +
-          `🔗 ሙሉ ዜናውን ለማንበብ:\n${item.link}`;
+        // የድሮ ሊንኮች ሚሞሪ እንዳይሞሉ መቆጣጠሪያ
+        if (sentArticles.size > 2000) {
+          const arr = Array.from(sentArticles);
+          arr.slice(0, 500).forEach(link => sentArticles.delete(link));
+        }
 
         for (let chatId of subscribers) {
-          try {
-            await bot.sendMessage(chatId, messageText);
-          } catch (err) {
-            console.error('Broadcast error:', err.message);
-          }
+          await formatAndSendNews(chatId, item, f.name);
         }
       }
     }
   }
 }
 
-setInterval(autoBroadcastNewOnly, 2 * 60 * 1000);
+// በየ 1 ደቂቃው ቼክ ያደርጋል
+setInterval(autoBroadcastNewOnly, 1 * 60 * 1000);
 
-// ሰርቨሩ እንዳይተኛ በየ 8 ደቂቃው ራሱን የሚቀሰቅስ (Keep-Alive)
+// ሰርቨሩ Render ላይ እንዳይተኛ በየ 5 ደቂቃው ራሱን የሚቀሰቅስ (Keep-Alive)
 setInterval(() => {
   https.get(`${APP_URL}/ping`, () => {}).on('error', () => {});
-}, 8 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 app.get('/ping', (req, res) => res.send('Awake'));
 
-// ተጠቃሚው መልእክት ሲልክ ወዲያውኑ ዜና ይልክለታል
+// ተጠቃሚው Bot ሲጀምር
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'ወዳጄ';
 
-  subscribers.add(chatId);
+  if (!subscribers.has(chatId)) {
+    subscribers.add(chatId);
+    const welcome = 
+      `👋 ሰላም ${userName}!\n\n` +
+      `⚽ የእንግሊዝ ፕሪሚየር ሊግ እና የስፖርት ዜናዎችን በቀጥታ በአማርኛ ማግኘት ጀምረዋል...\n\n` +
+      `🔄 አዳዲስ ዜናዎችን እያዘጋጀሁ ነው 👇`;
 
-  const welcome = 
-    `👋 ሰላም ${userName}!\n\n` +
-    `⚽ የዛሬ የቀጥታ የስፖርት እና ሰበር ዜናዎችን አሁኑኑ እያመጣሁልዎ ነው... 👇`;
-
-  await bot.sendMessage(chatId, welcome);
-  
-  // 🔥 ያለምንም መዘግየት ወዲያውኑ ዜናዎችን ወደ ቴሌግራምህ መላክ
-  await sendLiveNewsDirectly(chatId);
+    await bot.sendMessage(chatId, welcome);
+    await sendLiveNewsDirectly(chatId);
+  }
 });
 
 app.get('/', (req, res) => {
-  res.send('⚡ Real-time News Bot is Active & Ready!');
+  res.send('⚡ Premier League & Sports News Bot is Running in Amharic!');
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Sports & News Server running on port ${PORT}`);
+  console.log(`🚀 Sports News Bot running on port ${PORT}`);
 });
